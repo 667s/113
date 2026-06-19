@@ -1,0 +1,22 @@
+# 主组件 CMakeLists.txt
+idf_component_register(
+    SRCS
+        main.c
+        wifi_manager.c
+        mqtt_manager.c
+        rfid_reader.c
+        dht_sensor.c
+        pir_sensor.c
+        buzzer.c
+        servo_control.c
+    INCLUDE_DIRS
+        .
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        mqtt
+        driver
+        json
+)
