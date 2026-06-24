@@ -1,0 +1,46 @@
+server:
+  port: 8080
+  address: 0.0.0.0
+
+spring:
+  application:
+    name: dorm-security-backend
+
+  # MySQL 数据源配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/dorm_security?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: 050109
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # JPA 配置
+  jpa:
+    hibernate:
+      ddl-auto: update          # 自动建表（开发环境）, 生产环境改为 validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  # 初始化数据库（首次启动时执行 schema.sql）
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema.sql
+      continue-on-error: true
+
+# ==================== MQTT 配置 ====================
+mqtt:
+  broker-url: tcp://10.219.46.147:1883     # EMQX Broker 地址
+  client-id: springboot_dorm_backend    # 客户端ID
+  username:                             # EMQX认证用户名（如未开启则留空）
+  password:                             # EMQX认证密码
+  topics: dorm/door/rfid,dorm/door/pir,dorm/door/dht,dorm/door/alarm
+  qos: 1
+  completion-timeout: 5000              # 连接超时(ms)
+
+logging:
+  level:
+    com.dormsecurity: DEBUG
+    org.springframework.integration.mqtt: INFO

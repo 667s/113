@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "校园宿舍智能安防门"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "宿舍RFID门禁安防管理系统"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "宿舍安防"
+    },
+    {
+      "name": "internet_reason",
+      "value": "用于获取宿舍门禁数据、告警信息和传感器实时数据"
+    }
+  ]
+}
