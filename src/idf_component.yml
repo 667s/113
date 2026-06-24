@@ -1,7 +1,0 @@
-## ESP-IDF Component Manager 依赖声明
-## ESP-IDF v6.0 把 mqtt 移到了独立组件，需要在此声明
-dependencies:
-  espressif/esp_mqtt:
-    version: "^1.0"
-    rules:
-      - if: "idf_version >= 6.0"
