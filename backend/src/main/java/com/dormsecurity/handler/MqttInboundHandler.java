@@ -5,9 +5,12 @@ import com.dormsecurity.entity.RfidRecord;
 import com.dormsecurity.service.AlarmService;
 import com.dormsecurity.service.AuthorizedCardService;
 import com.dormsecurity.service.RfidService;
+import com.dormsecurity.service.ThresholdService;
+import com.dormsecurity.util.AesUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.paho.client.mqttv3.MqttClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +28,8 @@ public class MqttInboundHandler implements MessageHandler {
     private static RfidService rfidService;
     private static AlarmService alarmService;
     private static AuthorizedCardService authorizedCardService;
+    private static AesUtil aesUtil;
+    private static ThresholdService thresholdService;
 
     // PIR 内存缓存
     private static volatile boolean lastPir = false;
@@ -37,8 +42,11 @@ public class MqttInboundHandler implements MessageHandler {
 
     // MQTT 下发指令（由 MqttConfig 静态注入）
     private static String mqttBrokerUrl;
+    private static javax.net.ssl.SSLSocketFactory mqttSslFactory;
 
     public static void setBrokerUrl(String url) { mqttBrokerUrl = url; }
+    public static void setSslSocketFactory(javax.net.ssl.SSLSocketFactory sf) { mqttSslFactory = sf; }
+    public static void setAesUtil(AesUtil util) { aesUtil = util; }
 
     // --- Getters for REST API ---
     public static boolean isPir()     { return lastPir; }
@@ -50,13 +58,47 @@ public class MqttInboundHandler implements MessageHandler {
     @Autowired public void setRfidService(RfidService s)             { rfidService = s; }
     @Autowired public void setAlarmService(AlarmService s)           { alarmService = s; }
     @Autowired public void setAuthorizedCardService(AuthorizedCardService s) { authorizedCardService = s; }
+    @Autowired public void setThresholdService(ThresholdService s) { thresholdService = s; }
+
+    /**
+     * 尝试 AES 解密 payload
+     */
+    private String tryDecrypt(String payload) {
+        if (aesUtil == null || payload == null || payload.isEmpty()) {
+            return payload;
+        }
+        char first = payload.charAt(0);
+        if (first == '{' || first == '[') {
+            return payload;
+        }
+        try {
+            String decrypted = aesUtil.decrypt(payload);
+            if (decrypted != null && decrypted.length() > 0) {
+                log.info("AES decrypt SUCCESS, result first 80 chars: {}",
+                         decrypted.substring(0, Math.min(80, decrypted.length())));
+            }
+            if (decrypted != null && decrypted.length() > 0 &&
+                (decrypted.charAt(0) == '{' || decrypted.charAt(0) == '[')) {
+                return decrypted;
+            }
+            log.info("AES decrypt returned non-JSON: '{}'",
+                     decrypted != null ? decrypted.substring(0, Math.min(20, decrypted.length())) : "null");
+        } catch (Exception e) {
+            log.info("AES decrypt FAILED: {}", e.getMessage());
+        }
+        return payload;
+    }
 
     @Override
     public void handleMessage(Message<?> message) throws MessagingException {
         String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
-        String payload = (String) message.getPayload();
+        String rawPayload = (String) message.getPayload();
+        if (topic == null || rawPayload == null) return;
+
+        // ★ AES 解密
+        String payload = tryDecrypt(rawPayload);
         log.info("MQTT - Topic: {}, Payload: {}", topic, payload);
-        if (topic == null || payload == null) return;
+
         try {
             switch (topic) {
                 case "dorm/door/rfid":   handleRfid(payload);   break;
@@ -115,9 +157,37 @@ public class MqttInboundHandler implements MessageHandler {
 
     private void handleDht(String payload) throws Exception {
         JsonNode json = objectMapper.readTree(payload);
-        if (json.has("temperature")) lastTemp = (float) json.get("temperature").asDouble();
-        if (json.has("humidity")) lastHumidity = (float) json.get("humidity").asDouble();
+        float temp = lastTemp;
+        float hum = lastHumidity;
+        if (json.has("temperature")) temp = (float) json.get("temperature").asDouble();
+        if (json.has("humidity")) hum = (float) json.get("humidity").asDouble();
+
+        lastTemp = temp;
+        lastHumidity = hum;
         lastDhtTime = LocalDateTime.now().toString();
+
+        // ====== 阈值检测 → 超限自动告警 ======
+        if (thresholdService != null) {
+            float tempMax = thresholdService.getFloat("temp_max");
+            float humidityMax = thresholdService.getFloat("humidity_max");
+
+            if (tempMax > 0 && temp > tempMax) {
+                AlarmLog a = new AlarmLog();
+                a.setAlarmType("TEMP");
+                a.setMessage(String.format("温度超标！当前 %.1f°C > 阈值 %.1f°C", temp, tempMax));
+                a.setTriggeredAt(LocalDateTime.now());
+                alarmService.save(a);
+                log.warn("[ALARM] 温度超标: {}°C > {}°C", temp, tempMax);
+            }
+            if (humidityMax > 0 && hum > humidityMax) {
+                AlarmLog a = new AlarmLog();
+                a.setAlarmType("HUMIDITY");
+                a.setMessage(String.format("湿度超标！当前 %.1f%% > 阈值 %.1f%%", hum, humidityMax));
+                a.setTriggeredAt(LocalDateTime.now());
+                alarmService.save(a);
+                log.warn("[ALARM] 湿度超标: {:.1f}%% > {:.1f}%%", hum, humidityMax);
+            }
+        }
     }
 
     private void handleAlarm(String payload) throws Exception {
@@ -134,7 +204,12 @@ public class MqttInboundHandler implements MessageHandler {
         try {
             MqttClient client = new MqttClient(mqttBrokerUrl,
                     "backend_cmd_" + System.currentTimeMillis());
-            client.connect();
+            MqttConnectOptions opts = new MqttConnectOptions();
+            opts.setConnectionTimeout(10);
+            if (mqttBrokerUrl != null && mqttBrokerUrl.startsWith("ssl://") && mqttSslFactory != null) {
+                opts.setSocketFactory(mqttSslFactory);
+            }
+            client.connect(opts);
             MqttMessage msg = new MqttMessage(payload.getBytes());
             msg.setQos(1);
             client.publish(topic, msg);

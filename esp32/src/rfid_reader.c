@@ -119,7 +119,7 @@ static esp_err_t rc522_soft_reset(void)
 // ==================== PICC 卡片操作 ====================
 
 /**
- * 发送数据到卡片并接收应答 (完全复制参考 rc522.c 实现)
+ * 发送数据到卡片并接收应答
  */
 static esp_err_t rc522_transceive(uint8_t *send_data, uint8_t send_len,
                                    uint8_t *recv_data, uint8_t *recv_len)

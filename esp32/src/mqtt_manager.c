@@ -82,6 +82,7 @@ esp_err_t mqtt_init(mqtt_callback_t callback)
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = MQTT_BROKER_URI,
+        .broker.verification.certificate = MQTT_CA_CERT_PEM,
         .credentials.client_id = MQTT_CLIENT_ID,
         .session.keepalive = 60,
         .network.disable_auto_reconnect = false,

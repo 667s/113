@@ -2,6 +2,7 @@ package com.dormsecurity.controller;
 
 import com.dormsecurity.handler.MqttInboundHandler;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,6 +15,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/sensor")
+@PreAuthorize("hasAnyRole('ADMIN','USER')")
 public class SensorDataController {
 
     /** 最新温湿度 */

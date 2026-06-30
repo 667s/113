@@ -20,9 +20,38 @@ extern "C" {
 #define WIFI_MAX_RETRY      5           // 最大重试次数
 
 // ==================== MQTT 配置 ====================
-// 使用 mqtt:// 协议 (ESP-IDF esp_mqtt 原生支持)
-#define MQTT_BROKER_URI     "mqtt://10.219.46.147:1883"
+// 使用 mqtts:// 协议 (TLS 加密，端口 8883)
+#define MQTT_BROKER_URI     "mqtts://10.219.46.147:8883"
 #define MQTT_CLIENT_ID      "esp32_dorm_door"
+
+// ==================== AES 加密密钥 (与后端保持一致) ====================
+// 16 字节 = 128 bits, hex 编码
+#define AES_KEY_HEX         "00112233445566778899AABBCCDDEEFF"
+
+// ==================== TLS CA 证书 (EMQX 自签 CA) ====================
+#define MQTT_CA_CERT_PEM \
+    "-----BEGIN CERTIFICATE-----\n" \
+    "MIIDqzCCApOgAwIBAgIUXk0X6Mc8BkfE8y1q/+GyX2KacbcwDQYJKoZIhvcNAQEL\n" \
+    "BQAwZTELMAkGA1UEBhMCQ04xEjAQBgNVBAgMCUd1YW5nZG9uZzERMA8GA1UEBwwI\n" \
+    "U2hlbnpoZW4xFTATBgNVBAoMDERvcm1TZWN1cml0eTEYMBYGA1UEAwwPRG9ybVNl\n" \
+    "Y3VyaXR5LUNBMB4XDTI2MDYzMDA5MjQwMVoXDTM2MDYyNzA5MjQwMVowZTELMAkG\n" \
+    "A1UEBhMCQ04xEjAQBgNVBAgMCUd1YW5nZG9uZzERMA8GA1UEBwwIU2hlbnpoZW4x\n" \
+    "FTATBgNVBAoMDERvcm1TZWN1cml0eTEYMBYGA1UEAwwPRG9ybVNlY3VyaXR5LUNB\n" \
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAos9a4Iu25Dh9T3ytpObE\n" \
+    "yyL7mXVlyF2N3cVzudWwj3uSJZUl7o/qNig2rVJWte97GCUdwLiwtQ5y3djlNUdz\n" \
+    "rQ8wYdQsO6Gi9I3DcEqywp95Pd/ij6kBBYAYhKNDmi9Z4GDNyZJNs+hnU9fveYAP\n" \
+    "6hBmf33GZYTeBbQRvTIDp+h4RF1BvBq49lHck88XW3QOXzhRbDr7c/0kTdSSNEsM\n" \
+    "m6DWXoi9qmH6IbVV99jVaS+1H8pTGPbqKajA6fP+D+bWPUZt428SGyzpMYqLoW+i\n" \
+    "SFW0/GSX3AeP4Q8C/f/hfxaRfnEXtCTetpZM0T9B1WFdUHc62z4TaGJnt8cy9NEb\n" \
+    "QwIDAQABo1MwUTAdBgNVHQ4EFgQU2RwzPyzfmd08Z8bRgEsVwUDPng0wHwYDVR0j\n" \
+    "BBgwFoAU2RwzPyzfmd08Z8bRgEsVwUDPng0wDwYDVR0TAQH/BAUwAwEB/zANBgkq\n" \
+    "hkiG9w0BAQsFAAOCAQEAlbZUDoFR42MG0RsjvpvT5ZXjsXSOtXp5oOSWrr75XBdX\n" \
+    "kRIQ7A0jWXac8/sZgSMNtqjBl4g+tkfMjVGbpBU+k7ZjJ1Hk+2ewftJpOktiJ9oR\n" \
+    "dTnAfL6TWdL0q4VW1ua+miiv1IqkdreTfQ50UdutoQuptTG530Yx/pexA0XjMR0Q\n" \
+    "ca880dF47gLCsX0uTdq7toR+C1ThetqlySpVeBRSqdkqOkBuhItsw8pkck8/6Kpz\n" \
+    "nCz4x7Jx3re10eespYO1o5TA1uUsXvPkTjIP7hSQq6fNgrzpCn696D6J3rIZdNiL\n" \
+    "7pNtJngjzvEjmjJEUlq52xgxlhIJ4F671r3cFzl6Ng==\n" \
+    "-----END CERTIFICATE-----"
 
 // ==================== MQTT 主题 ====================
 #define TOPIC_RFID          "dorm/door/rfid"        // 发布: RFID刷卡事件(发UID给后端校验)

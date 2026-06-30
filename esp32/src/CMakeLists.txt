@@ -9,6 +9,7 @@ idf_component_register(
         pir_sensor.c
         buzzer.c
         servo_control.c
+        aes_crypto.c
     INCLUDE_DIRS
         .
     REQUIRES

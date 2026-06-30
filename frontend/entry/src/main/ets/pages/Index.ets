@@ -3,6 +3,10 @@
  * 1.传感器  2.刷卡记录  3.告警日志  4.授权卡管理
  */
 import { http } from '@kit.NetworkKit'
+import { router } from '@kit.ArkUI'
+import { promptAction } from '@kit.ArkUI'
+import { getToken, clearAuth, isLoggedIn, getDisplayName, getCaPath } from '../common/AuthUtil'
+import { preferences } from '@kit.ArkData'
 
 // ==================== 数据模型 ====================
 class RfidRecord {
@@ -38,9 +42,14 @@ interface StatusBody {
   isActive: boolean
 }
 
+interface ThresholdBody {
+  temp_max: string
+  humidity_max: string
+}
+
 // ==================== 常量 ====================
-const BASE: string = 'http://172.18.0.153:8080'
-const TAB_NAMES: string[] = ['传感器', '刷卡记录', '告警日志', '卡片管理']
+const BASE: string = 'https://10.219.46.147:8443'
+const TAB_NAMES: string[] = ['传感器', '刷卡记录', '告警日志', '远程控制', '卡片管理']
 
 // ==================== 主页面 ====================
 @Entry
@@ -77,11 +86,44 @@ struct Index {
   @State newName: string = ''
   @State newSid: string = ''
 
-  aboutToAppear(): void {
+  @State loginUsername: string = ''
+  @State isAdmin: boolean = false
+
+  // ---- 阈值设置 ----
+  @State tempMax: string = '40.0'
+  @State humidityMax: string = '80.0'
+  @State thresholdSaving: boolean = false
+  // HTTPS 自签 CA 证书路径（首次从 rawfile 写入缓存目录）
+  private caPath: string = ''
+
+  async aboutToAppear(): Promise<void> {
+    // 加载 CA 证书路径（HTTPS 自签证书验证）
+    this.caPath = await getCaPath()
+
+    // 登录检查
+    let loggedIn = await isLoggedIn()
+    if (!loggedIn) {
+      router.replaceUrl({ url: 'pages/LoginPage' })
+      return
+    }
+    this.loginUsername = await getDisplayName()
+
+    // 读取角色判断是否为管理员
+    try {
+      let prefs = await preferences.getPreferences(getContext(), 'dorm_security_auth')
+      let role = await prefs.get('role', '') as string
+      this.isAdmin = (role === 'ROLE_ADMIN')
+    } catch (e) {
+      this.isAdmin = false
+    }
+
     this.loadSensor()
     this.loadRfid(true)
     this.loadAlarms(true)
     this.loadCards()
+    if (this.isAdmin) {
+      this.loadThresholds()
+    }
     // 每2秒轮询传感器 + 刷卡最新 + 告警最新
     this.startPolling()
   }
@@ -142,14 +184,41 @@ struct Index {
   }
 
   // ==================== 网络 ====================
+  // 获取通用请求头 (含 JWT Token)
+  async authHeaders(): Promise<Record<string, string>> {
+    let h: Record<string, string> = {}
+    h['Content-Type'] = 'application/json'
+    let token = await getToken()
+    if (token) {
+      h['Authorization'] = 'Bearer ' + token
+    }
+    return h
+  }
+
+  // 401 统一处理
+  handleUnauthorized(code: number): boolean {
+    if (code === 401) {
+      clearAuth()
+      router.replaceUrl({ url: 'pages/LoginPage' })
+      return true
+    }
+    return false
+  }
+
   async httpGet(path: string): Promise<string> {
     const r: http.HttpRequest = http.createHttp()
-    const res: http.HttpResponse = await r.request(BASE + path, {
+    const opts: http.HttpRequestOptions = {
       method: http.RequestMethod.GET,
+      header: await this.authHeaders(),
       connectTimeout: 5000,
       readTimeout: 5000
-    })
+    }
+    if (this.caPath) opts.caPath = this.caPath
+    const res: http.HttpResponse = await r.request(BASE + path, opts)
     r.destroy()
+    if (this.handleUnauthorized(res.responseCode)) {
+      throw new Error('未登录')
+    }
     if (res.responseCode !== 200) {
       throw new Error('HTTP ' + res.responseCode)
     }
@@ -158,43 +227,61 @@ struct Index {
 
   async httpPost(path: string, body: Object): Promise<string> {
     const r: http.HttpRequest = http.createHttp()
-    const h: Record<string, string> = {}
-    h['Content-Type'] = 'application/json'
-    const res: http.HttpResponse = await r.request(BASE + path, {
+    const opts: http.HttpRequestOptions = {
       method: http.RequestMethod.POST,
-      header: h,
+      header: await this.authHeaders(),
       extraData: JSON.stringify(body),
       connectTimeout: 5000,
       readTimeout: 5000
-    })
+    }
+    if (this.caPath) opts.caPath = this.caPath
+    const res: http.HttpResponse = await r.request(BASE + path, opts)
     r.destroy()
+    if (this.handleUnauthorized(res.responseCode)) {
+      throw new Error('未登录')
+    }
     return res.result as string
   }
 
   async httpPut(path: string, body: Object): Promise<string> {
     const r: http.HttpRequest = http.createHttp()
-    const h: Record<string, string> = {}
-    h['Content-Type'] = 'application/json'
-    const res: http.HttpResponse = await r.request(BASE + path, {
+    const opts: http.HttpRequestOptions = {
       method: http.RequestMethod.PUT,
-      header: h,
+      header: await this.authHeaders(),
       extraData: JSON.stringify(body),
       connectTimeout: 5000,
       readTimeout: 5000
-    })
+    }
+    if (this.caPath) opts.caPath = this.caPath
+    const res: http.HttpResponse = await r.request(BASE + path, opts)
     r.destroy()
+    if (this.handleUnauthorized(res.responseCode)) {
+      throw new Error('未登录')
+    }
     return res.result as string
   }
 
   async httpDel(path: string): Promise<string> {
     const r: http.HttpRequest = http.createHttp()
-    const res: http.HttpResponse = await r.request(BASE + path, {
+    const opts: http.HttpRequestOptions = {
       method: http.RequestMethod.DELETE,
+      header: await this.authHeaders(),
       connectTimeout: 5000,
       readTimeout: 5000
-    })
+    }
+    if (this.caPath) opts.caPath = this.caPath
+    const res: http.HttpResponse = await r.request(BASE + path, opts)
     r.destroy()
+    if (this.handleUnauthorized(res.responseCode)) {
+      throw new Error('未登录')
+    }
     return res.result as string
+  }
+
+  // 退出登录
+  async doLogout(): Promise<void> {
+    await clearAuth()
+    router.replaceUrl({ url: 'pages/LoginPage' })
   }
 
   // ==================== 传感器 ====================
@@ -216,6 +303,35 @@ struct Index {
       this.pirTime = (p['lastTime'] as string) || ''
     } catch (e) {
       this.pirDetected = false
+    }
+  }
+
+  // ==================== 阈值管理 ====================
+  async loadThresholds(): Promise<void> {
+    try {
+      let res = await this.httpGet('/api/threshold')
+      let data = JSON.parse(res) as Record<string, Object>
+      this.tempMax = String(data['temp_max'] || '40.0')
+      this.humidityMax = String(data['humidity_max'] || '80.0')
+    } catch (e) {
+      // 保持默认值
+    }
+  }
+
+  async saveThresholds(): Promise<void> {
+    if (this.thresholdSaving) return
+    this.thresholdSaving = true
+    try {
+      let body: ThresholdBody = {
+        temp_max: this.tempMax,
+        humidity_max: this.humidityMax
+      }
+      await this.httpPut('/api/threshold', body)
+      this.thresholdSaving = false
+      promptAction.showToast({ message: '阈值保存成功', duration: 2000 })
+    } catch (e) {
+      this.thresholdSaving = false
+      promptAction.showToast({ message: '保存失败', duration: 2000 })
     }
   }
 
@@ -340,18 +456,35 @@ struct Index {
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
+        Blank()
+        Text(this.loginUsername)
+          .fontSize(13)
+          .fontColor('#BBDEFB')
+          .margin({ right: 12 } as Margin)
+        Text('退出')
+          .fontSize(12)
+          .fontColor('#FFFFFF')
+          .backgroundColor('#1976D2')
+          .borderRadius(12)
+          .padding({ left: 10, right: 10, top: 4, bottom: 4 } as Padding)
+          .onClick(() => { this.doLogout() })
       }
       .width('100%')
       .height(50)
       .backgroundColor('#1565C0')
       .justifyContent(FlexAlign.Center)
+      .padding({ left: 16, right: 16 } as Padding)
 
       // 内容区
       Tabs({ index: this.tab }) {
         TabContent() { this.SensorTab() }
         TabContent() { this.RfidTab() }
         TabContent() { this.AlarmTab() }
+        TabContent() { this.RemoteTab() }
         TabContent() { this.CardTab() }
+        if (this.isAdmin) {
+          TabContent() { this.ThresholdTab() }
+        }
       }
       .barHeight(0)
       .layoutWeight(1)
@@ -368,10 +501,23 @@ struct Index {
               .fontColor(this.tab === i ? '#1565C0' : '#999999')
               .margin({ top: 3 } as Margin)
           }
-          .width('25%')
-          .padding(6)
+          .width(this.isAdmin ? '16.6%' : '20%')
+          .padding(4)
           .onClick(() => { this.tab = i })
         })
+        if (this.isAdmin) {
+          Column() {
+            Text('⚙️')
+              .fontSize(20)
+            Text('阈值')
+              .fontSize(11)
+              .fontColor(this.tab === 5 ? '#1565C0' : '#999999')
+              .margin({ top: 3 } as Margin)
+          }
+          .width('16.6%')
+          .padding(4)
+          .onClick(() => { this.tab = 5 })
+        }
       }
       .width('100%')
       .height(52)
@@ -386,7 +532,9 @@ struct Index {
     if (i === 0) return '🌡️'
     if (i === 1) return '💳'
     if (i === 2) return '🚨'
-    return '🔑'
+    if (i === 3) return '🔓'
+    if (i === 4) return '🔑'
+    return '⚙️'
   }
 
   // ==================== 1. 传感器 Tab ====================
@@ -721,6 +869,72 @@ struct Index {
     return t === this.alarmFilter
   }
 
+  // ==================== 远程控制 Tab ====================
+  @Builder RemoteTab(): void {
+    Column() {
+      // 标题
+      Row() {
+        Text('远程控制')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+        Blank()
+      }
+      .width('100%')
+      .padding(12)
+      .backgroundColor('#FFFFFF')
+
+      // 门锁图标 + 状态
+      Column() {
+        Text('🔓')
+          .fontSize(72)
+        Text('远程开门')
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#333333')
+          .margin({ top: 16 } as Margin)
+        Text('点击下方按钮向 ESP32 发送开门指令')
+          .fontSize(13)
+          .fontColor('#999999')
+          .margin({ top: 8 } as Margin)
+      }
+      .width('100%')
+      .padding(40)
+      .alignItems(HorizontalAlign.Center)
+
+      // 开门按钮
+      Button('🟢 远程开门')
+        .fontSize(20)
+        .width('70%')
+        .height(60)
+        .backgroundColor('#4CAF50')
+        .fontColor('#FFFFFF')
+        .borderRadius(16)
+        .margin({ top: 20 } as Margin)
+        .onClick(() => { this.doRemoteOpen() })
+
+      Text('指令通过 MQTT 下发至 ESP32，控制舵机转动 90° 模拟开门')
+        .fontSize(11)
+        .fontColor('#CCCCCC')
+        .width('80%')
+        .textAlign(TextAlign.Center)
+        .margin({ top: 16 } as Margin)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F5F5F5')
+  }
+
+  // 远程开门请求
+  async doRemoteOpen(): Promise<void> {
+    try {
+      let emptyBody: Record<string, string> = {}
+      await this.httpPost('/api/remote/open', emptyBody)
+      promptAction.showToast({ message: '开门指令已发送', duration: 2000 })
+    } catch (e) {
+      promptAction.showToast({ message: '发送失败，请检查后端', duration: 2000 })
+    }
+  }
+
   // ==================== 4. 卡片管理 Tab ====================
   @Builder CardTab(): void {
     Stack() {
@@ -746,7 +960,11 @@ struct Index {
             Column() {
               Text('🔑').fontSize(48).opacity(0.25)
               Text('暂无授权卡').fontSize(14).fontColor('#999999').margin({ top: 8 } as Margin)
-              Text('点击右下角 + 添加新卡').fontSize(11).fontColor('#CCCCCC').margin({ top: 4 } as Margin)
+              if (this.isAdmin) {
+                Text('点击右下角 + 添加新卡').fontSize(11).fontColor('#CCCCCC').margin({ top: 4 } as Margin)
+              } else {
+                Text('仅管理员可添加授权卡').fontSize(11).fontColor('#CCCCCC').margin({ top: 4 } as Margin)
+              }
             }
             .width('100%')
             .padding(60)
@@ -785,20 +1003,22 @@ struct Index {
                   .backgroundColor(c.isActive ? '#4CAF50' : '#9E9E9E')
                   .borderRadius(4)
                   .padding({ left: 8, right: 8, top: 3, bottom: 3 } as Padding)
-                Row() {
-                  Text(c.isActive ? '停用' : '启用')
-                    .fontSize(11)
-                    .fontColor('#1565C0')
-                    .padding({ left: 4, right: 4, top: 4, bottom: 4 } as Padding)
-                    .onClick(() => { this.doToggleCard(c) })
-                  Text('删除')
-                    .fontSize(11)
-                    .fontColor('#F44336')
-                    .padding({ left: 4, right: 4, top: 4, bottom: 4 } as Padding)
-                    .margin({ left: 4 } as Margin)
-                    .onClick(() => { this.doDeleteCard(c) })
+                if (this.isAdmin) {
+                  Row() {
+                    Text(c.isActive ? '停用' : '启用')
+                      .fontSize(11)
+                      .fontColor('#1565C0')
+                      .padding({ left: 4, right: 4, top: 4, bottom: 4 } as Padding)
+                      .onClick(() => { this.doToggleCard(c) })
+                    Text('删除')
+                      .fontSize(11)
+                      .fontColor('#F44336')
+                      .padding({ left: 4, right: 4, top: 4, bottom: 4 } as Padding)
+                      .margin({ left: 4 } as Margin)
+                      .onClick(() => { this.doDeleteCard(c) })
+                  }
+                  .margin({ top: 6 } as Margin)
                 }
-                .margin({ top: 6 } as Margin)
               }
               .alignItems(HorizontalAlign.End)
             }
@@ -815,16 +1035,18 @@ struct Index {
       .height('100%')
       .padding({ bottom: 80 } as Padding)
 
-      // 添加按钮
-      Button('＋')
-        .fontSize(28)
-        .width(56)
-        .height(56)
-        .borderRadius(28)
-        .backgroundColor('#1565C0')
-        .fontColor('#FFFFFF')
-        .position({ x: '82%', y: '88%' } as Position)
-        .onClick(() => { this.showAdd = true })
+      // 添加按钮（仅管理员可见）
+      if (this.isAdmin) {
+        Button('＋')
+          .fontSize(28)
+          .width(56)
+          .height(56)
+          .borderRadius(28)
+          .backgroundColor('#1565C0')
+          .fontColor('#FFFFFF')
+          .position({ x: '82%', y: '88%' } as Position)
+          .onClick(() => { this.showAdd = true })
+      }
     }
     .width('100%')
     .height('100%')
@@ -878,6 +1100,87 @@ struct Index {
       .justifyContent(FlexAlign.Center)
       .alignItems(HorizontalAlign.Center)
     }
+  }
+
+  // ==================== 5. 阈值设置 Tab (仅管理员) ====================
+  @Builder ThresholdTab(): void {
+    Column() {
+      // 标题
+      Row() {
+        Text('阈值设置')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+        Blank()
+      }
+      .width('100%')
+      .padding(12)
+      .backgroundColor('#FFFFFF')
+
+      // 说明
+      Text('当温湿度超过设定阈值时，自动生成告警记录')
+        .fontSize(12)
+        .fontColor('#999999')
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 8, bottom: 4 } as Padding)
+
+      // 温度阈值
+      Row() {
+        Text('🌡️ 温度上限 (°C)')
+          .fontSize(14)
+          .fontColor('#333333')
+          .layoutWeight(1)
+        TextInput({ text: this.tempMax })
+          .width(100)
+          .type(InputType.Number)
+          .fontSize(16)
+          .onChange((v: string) => { this.tempMax = v })
+      }
+      .width('100%')
+      .padding(14)
+      .backgroundColor('#FFFFFF')
+      .borderRadius(8)
+      .margin({ left: 12, right: 12, top: 12 } as Margin)
+
+      // 湿度阈值
+      Row() {
+        Text('💧 湿度上限 (%)')
+          .fontSize(14)
+          .fontColor('#333333')
+          .layoutWeight(1)
+        TextInput({ text: this.humidityMax })
+          .width(100)
+          .type(InputType.Number)
+          .fontSize(16)
+          .onChange((v: string) => { this.humidityMax = v })
+      }
+      .width('100%')
+      .padding(14)
+      .backgroundColor('#FFFFFF')
+      .borderRadius(8)
+      .margin({ left: 12, right: 12, top: 12 } as Margin)
+
+      // 保存按钮
+      Button(this.thresholdSaving ? '保存中...' : '保存阈值')
+        .width('90%')
+        .fontSize(15)
+        .backgroundColor('#1565C0')
+        .fontColor('#FFFFFF')
+        .borderRadius(8)
+        .margin({ top: 24 } as Margin)
+        .enabled(!this.thresholdSaving)
+        .onClick(() => { this.saveThresholds() })
+
+      // 当前状态提示
+      Text('当前温度: ' + this.temperature.toFixed(1) + '°C  |  当前湿度: ' + this.humidity.toFixed(1) + '%')
+        .fontSize(12)
+        .fontColor('#AAAAAA')
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .padding(16)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F5F5F5')
   }
 
   // ==================== 告警颜色工具 ====================

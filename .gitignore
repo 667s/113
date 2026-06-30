@@ -16,6 +16,24 @@ sdkconfig
 sdkconfig.old
 dependencies.lock
 
+# Maven / Spring Boot
+backend/target/
+
+# DevEco Studio / HarmonyOS
+frontend/**/build/
+frontend/**/.preview/
+frontend/.hvigor/
+frontend/node_modules/
+frontend/oh_modules/
+frontend/**/oh_modules/
+
+# 证书私钥/p12（不要提交）
+certs/*.key
+certs/*.p12
+certs/*.csr
+certs/*.srl
+**/certs/*.p12
+
 # OS junk
 Thumbs.db
 Desktop.ini

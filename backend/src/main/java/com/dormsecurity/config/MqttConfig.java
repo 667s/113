@@ -1,10 +1,12 @@
 package com.dormsecurity.config;
 
 import com.dormsecurity.handler.MqttInboundHandler;
+import com.dormsecurity.util.AesUtil;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.core.MessageProducer;
@@ -16,6 +18,12 @@ import org.springframework.integration.mqtt.support.DefaultPahoMessageConverter;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import java.io.InputStream;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.List;
 
 @Configuration
@@ -42,6 +50,35 @@ public class MqttConfig {
     @Value("${mqtt.topics}")
     private List<String> topics;
 
+    @Value("${ssl.ca-cert-path:classpath:certs/ca.crt}")
+    private String caCertPath;
+
+    /**
+     * SSL SocketFactory — 加载自签 CA 证书，信任 EMQX TLS
+     */
+    private javax.net.ssl.SSLSocketFactory createSslSocketFactory() throws Exception {
+        // 加载 PEM 格式 CA 证书
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        X509Certificate caCert;
+        try (InputStream is = new ClassPathResource(
+                caCertPath.replace("classpath:", "")).getInputStream()) {
+            caCert = (X509Certificate) cf.generateCertificate(is);
+        }
+
+        // 创建 TrustStore 并导入 CA
+        KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+        trustStore.load(null, null);
+        trustStore.setCertificateEntry("emqx-ca", caCert);
+
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(
+                TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trustStore);
+
+        SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
+        sslContext.init(null, tmf.getTrustManagers(), null);
+        return sslContext.getSocketFactory();
+    }
+
     /**
      * MQTT 客户端工厂
      */
@@ -55,6 +92,16 @@ public class MqttConfig {
         options.setConnectionTimeout(10);
         options.setKeepAliveInterval(60);
 
+        // SSL/TLS 配置
+        if (brokerUrl != null && brokerUrl.startsWith("ssl://")) {
+            try {
+                cachedSslFactory = createSslSocketFactory();
+                options.setSocketFactory(cachedSslFactory);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to create SSL SocketFactory for MQTT", e);
+            }
+        }
+
         if (username != null && !username.isEmpty()) {
             options.setUserName(username);
         }
@@ -66,9 +113,14 @@ public class MqttConfig {
         return factory;
     }
 
-    /**
-     * MQTT 入站消息通道
-     */
+    private final AesUtil aesUtil;
+
+    // 缓存 SSL SocketFactory (用于 publishMqtt 下发指令)
+    private javax.net.ssl.SSLSocketFactory cachedSslFactory;
+
+    public MqttConfig(AesUtil aesUtil) {
+        this.aesUtil = aesUtil;
+    }
     @Bean
     public MessageChannel mqttInputChannel() {
         return new DirectChannel();
@@ -104,6 +156,10 @@ public class MqttConfig {
     public MessageHandler mqttInboundHandler() {
         MqttInboundHandler handler = new MqttInboundHandler();
         MqttInboundHandler.setBrokerUrl(brokerUrl);
+        MqttInboundHandler.setAesUtil(aesUtil);
+        if (cachedSslFactory != null) {
+            MqttInboundHandler.setSslSocketFactory(cachedSslFactory);
+        }
         return handler;
     }
 

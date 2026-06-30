@@ -1,6 +1,10 @@
 server:
-  port: 8080
+  port: 8443
   address: 0.0.0.0
+  ssl:
+    key-store: classpath:certs/server.p12
+    key-store-password: 123456
+    key-store-type: PKCS12
 
 spring:
   application:
@@ -32,13 +36,26 @@ spring:
 
 # ==================== MQTT 配置 ====================
 mqtt:
-  broker-url: tcp://10.219.46.147:1883     # EMQX Broker 地址
-  client-id: springboot_dorm_backend    # 客户端ID
-  username:                             # EMQX认证用户名（如未开启则留空）
-  password:                             # EMQX认证密码
+  broker-url: tcp://10.219.46.147:1883     # EMQX Broker 地址 (先用TCP，TLS待解决Paho兼容性)
+  client-id: springboot_dorm_backend        # 客户端ID
+  username:                                 # EMQX认证用户名（如未开启则留空）
+  password:                                 # EMQX认证密码
   topics: dorm/door/rfid,dorm/door/pir,dorm/door/dht,dorm/door/alarm
   qos: 1
-  completion-timeout: 5000              # 连接超时(ms)
+  completion-timeout: 5000                  # 连接超时(ms)
+
+# ==================== JWT 配置 ====================
+jwt:
+  secret: DormSecurity2024SecretKeyForJWTTokenGeneration!@#$
+  expiration: 86400000                      # Token有效期: 24小时 (毫秒)
+
+# ==================== AES 加密密钥 (与ESP32保持一致) ====================
+aes:
+  key: 00112233445566778899AABBCCDDEEFF     # 16字节十六进制密钥
+
+# ==================== SSL 证书路径 ====================
+ssl:
+  ca-cert-path: classpath:certs/ca.crt
 
 logging:
   level:

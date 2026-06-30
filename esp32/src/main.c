@@ -40,6 +40,7 @@
 #include "pir_sensor.h"
 #include "buzzer.h"
 #include "servo_control.h"
+#include "aes_crypto.h"
 
 static const char *TAG = "MAIN";
 
@@ -59,14 +60,27 @@ static cJSON *json_create_base(void)
     return root;
 }
 
-/** JSON → 字符串 → 发布 */
+/** JSON → AES加密 → Base64 → MQTT发布 (感知层安全) */
 static void json_publish(const char *topic, cJSON *root)
 {
-    char *str = cJSON_PrintUnformatted(root);
-    if (str) {
-        mqtt_publish(topic, str);
-        free(str);
+    char *plain = cJSON_PrintUnformatted(root);
+    if (!plain) {
+        cJSON_Delete(root);
+        return;
     }
+
+    // ★ AES-128-CBC 加密 → Base64
+    char *encrypted = aes_encrypt_to_base64(plain);
+    if (encrypted) {
+        mqtt_publish(topic, encrypted);
+        free(encrypted);
+    } else {
+        // 加密失败时回退明文 (调试用)
+        ESP_LOGW(TAG, "AES encrypt failed, sending plaintext");
+        mqtt_publish(topic, plain);
+    }
+
+    free(plain);
     cJSON_Delete(root);
 }
 
